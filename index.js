@@ -25,17 +25,13 @@ class WhisperMix {
     }
 
     async fromVoiceFile(filePath) {
-        const formData = new FormData();
-        formData.append('file', fs.createReadStream(filePath));
-        formData.append('model', this.model);
-
-        return this._makeRequest(formData);
+        return this.fromVoiceStream(fs.createReadStream(filePath));
     }
 
     async fromVoiceStream(audioStream) {
         return new Promise((resolve, reject) => {
             const formData = new FormData();
-            formData.append('file', audioStream, { filename: 'audio.mp3' });
+            formData.append('file', audioStream);
             formData.append('model', this.model);
 
             this._makeRequest(formData)
