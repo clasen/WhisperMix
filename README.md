@@ -37,7 +37,7 @@ const whisperGroq = new WhisperMix({ model: 'whisper-large-v3' }); // For Groq's
 
 ```javascript
 const filePath = 'path/to/your/audio/file.mp3';
-whisperGroq.fromVoiceFile(filePath)
+whisperGroq.fromFile(filePath)
   .then(transcription => console.log(transcription))
   .catch(error => console.error(error));
 ```
@@ -48,7 +48,7 @@ whisperGroq.fromVoiceFile(filePath)
 const fs = require('fs');
 const audioStream = fs.createReadStream('path/to/your/audio/file.mp3');
 
-whisperGroq.fromVoiceStream(audioStream)
+whisperGroq.fromStream(audioStream)
   .then(transcription => console.log(transcription))
   .catch(error => console.error(error));
 ```
@@ -61,7 +61,7 @@ Creates a new WhisperMix instance.
 
 - `options.model`: The model to use for transcription. Can be 'whisper-1' (OpenAI) or 'whisper-large-v3' (Groq).
 
-### `whisper.fromVoiceFile(filePath)`
+### `whisper.fromFile(filePath)`
 
 Transcribes audio from a file.
 
@@ -69,7 +69,7 @@ Transcribes audio from a file.
 
 Returns a Promise that resolves with the transcription text.
 
-### `whisper.fromVoiceStream(audioStream)`
+### `whisper.fromStream(audioStream)`
 
 Transcribes audio from a stream.
 
