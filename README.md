@@ -30,14 +30,14 @@ You can initialize WhisperMix with a specific model:
 ```javascript
 const whisper = new WhisperMix({ model: 'whisper-1' }); // For OpenAI's Whisper
 // or
-const whisper = new WhisperMix({ model: 'whisper-large-v3' }); // For Groq's Whisper Large v3
+const whisperGroq = new WhisperMix({ model: 'whisper-large-v3' }); // For Groq's Whisper Large v3
 ```
 
 ### 📄 Transcribing from a File
 
 ```javascript
 const filePath = 'path/to/your/audio/file.mp3';
-whisper.fromVoiceFile(filePath)
+whisperGroq.fromVoiceFile(filePath)
   .then(transcription => console.log(transcription))
   .catch(error => console.error(error));
 ```
@@ -48,7 +48,7 @@ whisper.fromVoiceFile(filePath)
 const fs = require('fs');
 const audioStream = fs.createReadStream('path/to/your/audio/file.mp3');
 
-whisper.fromVoiceStream(audioStream)
+whisperGroq.fromVoiceStream(audioStream)
   .then(transcription => console.log(transcription))
   .catch(error => console.error(error));
 ```
