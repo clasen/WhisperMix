@@ -1,7 +1,6 @@
 const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
-require('dotenv').config();
 
 class WhisperMix {
     constructor(setup = { model: 'whisper-1' }) {

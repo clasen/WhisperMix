@@ -1,3 +1,4 @@
+require('dotenv').config();
 const WhisperMix = require('../index.js')
 
 const transcribe = new WhisperMix({ model: 'whisper-large-v3' });

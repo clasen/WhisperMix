@@ -1,5 +1,6 @@
 {
     "name": "whispermix",
+    "version": "1.0.4",    
     "keywords": [
         "whisper",
         "openai",
@@ -26,7 +27,6 @@
         "type": "git",
         "url": "git+https://github.com/clasen/WhisperMix.git"
     },
-    "version": "1.0.2",
     "description": "",
     "main": "index.js",
     "scripts": {
@@ -39,7 +39,6 @@
     },
     "dependencies": {
         "axios": "^1.7.2",
-        "dotenv": "^16.4.5",
         "form-data": "^4.0.0"
     }
 }
