@@ -1,0 +1,45 @@
+{
+    "name": "whispermix",
+    "keywords": [
+        "whisper",
+        "openai",
+        "groq",
+        "transcription",
+        "speech-to-text",
+        "audio",
+        "voice",
+        "ai",
+        "machine-learning",
+        "nlp",
+        "natural-language-processing",
+        "audio-processing",
+        "voice-recognition",
+        "speech-recognition",
+        "api-wrapper",
+        "whisper-large-v3",
+        "whisper-1",
+        "streaming",
+        "file-processing",
+        "multilingual"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/clasen/WhisperMix.git"
+    },
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "author": "Martin Clasen",
+    "license": "MIT",
+    "bugs": {
+        "url": "https://github.com/clasen/ModelMix/issues"
+    },
+    "dependencies": {
+        "axios": "^1.7.2",
+        "dotenv": "^16.4.5",
+        "form-data": "^4.0.0"
+    }
+}
