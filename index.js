@@ -3,7 +3,7 @@ const FormData = require('form-data');
 const fs = require('fs');
 
 class WhisperMix {
-    
+
     constructor(setup = { model: 'whisper-1' }) {
         const config = {
             'whisper-1': {
@@ -24,11 +24,11 @@ class WhisperMix {
         this.apiUrl = config[this.model].url;
     }
 
-    async fromVoiceFile(filePath) {
-        return this.fromVoiceStream(fs.createReadStream(filePath));
+    async fromFile(filePath) {
+        return this.fromStream(fs.createReadStream(filePath));
     }
 
-    async fromVoiceStream(audioStream) {
+    async fromStream(audioStream) {
         return new Promise((resolve, reject) => {
             const formData = new FormData();
             formData.append('file', audioStream);
