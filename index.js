@@ -3,25 +3,25 @@ const FormData = require('form-data');
 const fs = require('fs');
 
 class WhisperMix {
+    
     constructor(setup = { model: 'whisper-1' }) {
         const config = {
             'whisper-1': {
                 url: 'https://api.openai.com/v1/audio/transcriptions',
-                code: 'OPENAI',
+                apiKey: process.env.OPENAI_API_KEY,
             },
             'whisper-large-v3': {
                 url: 'https://api.groq.com/openai/v1/audio/transcriptions',
-                code: 'GROQ',
+                apiKey: process.env.GROQ_API_KEY,
             },
         };
 
         this.model = setup.model;
-        this.apiKey = process.env[config[this.model].code + '_API_KEY'];
+        this.apiKey = config[this.model].apiKey;
 
         Object.assign(this, setup)
 
         this.apiUrl = config[this.model].url;
-
     }
 
     async fromVoiceFile(filePath) {
