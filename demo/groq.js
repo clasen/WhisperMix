@@ -1,11 +1,8 @@
 const WhisperMix = require('../index.js')
 
-const transcribe = new WhisperMix({ model: 'whisper-1' });
-
+const transcribe = new WhisperMix({ model: 'whisper-large-v3' });
 
 main(); async function main() {
-    const r = [];
-    r.push(transcribe.fromVoiceFile('./example.mp3'));
-    const x = await Promise.all(r).catch(console.log);
-    console.log(x)
+    const r = transcribe.fromVoiceFile('./example.mp3');
+    console.log(r)
 }

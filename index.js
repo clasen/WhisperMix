@@ -59,4 +59,5 @@ class WhisperMix {
         }
     }
 }
+
 module.exports = WhisperMix
