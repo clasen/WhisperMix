@@ -1,6 +1,7 @@
 {
     "name": "whispermix",
-    "version": "1.1.4",    
+    "description": "🎙️ WhisperMix is a versatile module for transcribing audio using OpenAI’s Whisper or Groq’s Whisper v3 model.",
+    "version": "1.1.8",    
     "keywords": [
         "whisper",
         "openai",
@@ -27,7 +28,6 @@
         "type": "git",
         "url": "git+https://github.com/clasen/WhisperMix.git"
     },
-    "description": "",
     "main": "index.js",
     "scripts": {
         "test": "echo \"Error: no test specified\" && exit 1"
