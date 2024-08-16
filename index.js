@@ -1,10 +1,19 @@
 const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
+const Bottleneck = require('bottleneck');
 
 class WhisperMix {
+    constructor(setup = {}) {
+        this.model = 'whisper-1';
+        this.bottleneck = {
+            minTime: 2000,
+            maxConcurrent: 1,
+            reservoir: 18,
+            reservoirRefreshAmount: 18,
+            reservoirRefreshInterval: 60000
+        };
 
-    constructor(setup = { model: 'whisper-1' }) {
         const config = {
             'whisper-1': {
                 url: 'https://api.openai.com/v1/audio/transcriptions',
@@ -16,12 +25,12 @@ class WhisperMix {
             },
         };
 
-        this.model = setup.model;
-        this.apiKey = config[this.model].apiKey;
+        Object.assign(this, setup);
 
-        Object.assign(this, setup)
-
+        this.apiKey = this.apiKey || config[this.model].apiKey;
         this.apiUrl = config[this.model].url;
+
+        this.limiter = new Bottleneck(this.bottleneck);
     }
 
     async fromFile(filePath) {
@@ -29,7 +38,7 @@ class WhisperMix {
     }
 
     async fromStream(audioStream) {
-        return new Promise((resolve, reject) => {
+        return this.limiter.schedule(() => new Promise((resolve, reject) => {
             const formData = new FormData();
             formData.append('file', audioStream);
             formData.append('model', this.model);
@@ -37,7 +46,7 @@ class WhisperMix {
             this._makeRequest(formData)
                 .then(resolve)
                 .catch(reject);
-        });
+        }));
     }
 
     async _makeRequest(formData) {
@@ -55,4 +64,4 @@ class WhisperMix {
     }
 }
 
-module.exports = WhisperMix
+module.exports = WhisperMix;

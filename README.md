@@ -53,6 +53,33 @@ whisperGroq.fromStream(audioStream)
   .catch(error => console.error(error));
 ```
 
+### 🚦 Bottleneck Configuration
+
+WhisperMix uses Bottleneck for rate limiting. You can configure the Bottleneck settings when initializing WhisperMix:
+
+```javascript
+const whisper = new WhisperMix({
+  model: 'whisper-1',
+  bottleneck: {
+    minTime: 3000,
+    maxConcurrent: 1,
+    reservoir: 18,
+    reservoirRefreshAmount: 18,
+    reservoirRefreshInterval: 60000
+  }
+});
+```
+
+The default Bottleneck configuration is:
+
+- `minTime`: 3000 ms (minimum time between requests)
+- `maxConcurrent`: 1 (maximum number of concurrent requests)
+- `reservoir`: 18 (number of requests that can be made before throttling)
+- `reservoirRefreshAmount`: 18 (number of requests added back to the reservoir)
+- `reservoirRefreshInterval`: 60000 ms (time interval for refreshing the reservoir)
+
+You can adjust these settings based on your specific rate limiting needs.
+
 ## 📚 API
 
 ### `new WhisperMix(options)`
@@ -60,6 +87,7 @@ whisperGroq.fromStream(audioStream)
 Creates a new WhisperMix instance.
 
 - `options.model`: The model to use for transcription. Can be 'whisper-1' (OpenAI) or 'whisper-large-v3' (Groq).
+- `options.bottleneck`: (Optional) Configuration for Bottleneck rate limiting.
 
 ### `whisper.fromFile(filePath)`
 

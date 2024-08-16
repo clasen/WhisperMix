@@ -1,7 +1,7 @@
 {
     "name": "whispermix",
     "description": "🎙️ WhisperMix is a versatile module for transcribing audio using OpenAI’s Whisper or Groq’s Whisper v3 model.",
-    "version": "1.1.8",    
+    "version": "1.2.0",
     "keywords": [
         "whisper",
         "openai",
@@ -22,7 +22,8 @@
         "whisper-1",
         "streaming",
         "file-processing",
-        "multilingual"
+        "multilingual",
+        "bottleneck"
     ],
     "repository": {
         "type": "git",
@@ -38,7 +39,8 @@
         "url": "https://github.com/clasen/WhisperMix/issues"
     },
     "dependencies": {
-        "axios": "^1.7.2",
+        "axios": "^1.7.4",
+        "bottleneck": "^2.19.5",
         "form-data": "^4.0.0"
     }
 }
