@@ -2,6 +2,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
 const Bottleneck = require('bottleneck');
+const path = require('path');
 
 class WhisperMix {
     constructor(setup = {}) {
@@ -34,7 +35,8 @@ class WhisperMix {
     }
 
     async fromFile(filePath) {
-        return this.fromStream(fs.createReadStream(filePath));
+        const absolutePath = path.resolve(filePath);
+        return this.fromStream(fs.createReadStream(absolutePath));
     }
 
     async fromStream(audioStream) {
