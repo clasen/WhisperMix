@@ -53,6 +53,12 @@ whisperGroq.fromStream(audioStream)
   .catch(error => console.error(error));
 ```
 
+### ⏱️ Long Audio Processing
+
+WhisperMix automatically handles long audio files by splitting them into smaller segments if they exceed 15 minutes in duration. This process is transparent to the user:
+
+The segmented transcriptions are automatically merged into a single result, ensuring a smooth experience when working with content of any length.
+
 ### 🚦 Bottleneck Configuration
 
 WhisperMix uses Bottleneck for rate limiting. You can configure the Bottleneck settings when initializing WhisperMix:
@@ -88,7 +94,7 @@ Creates a new WhisperMix instance.
 
 - `options.model`: The model to use for transcription. Can be 'whisper-1' (OpenAI) or 'whisper-large-v3' (Groq).
 - `options.bottleneck`: (Optional) Configuration for Bottleneck rate limiting.
-
+- `options.chunkSize`: (Optional) The size in seconds of the chunks to split the audio into. Default is 890 seconds.
 ### `whisper.fromFile(filePath)`
 
 Transcribes audio from a file.

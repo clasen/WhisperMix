@@ -3,6 +3,9 @@ const FormData = require('form-data');
 const fs = require('fs');
 const Bottleneck = require('bottleneck');
 const path = require('path');
+const ffmpeg = require('fluent-ffmpeg');
+const { getAudioDurationInSeconds } = require('get-audio-duration');
+const os = require('os'); // For temporary directory
 
 class WhisperMix {
     constructor(setup = {}) {
@@ -14,6 +17,7 @@ class WhisperMix {
             reservoirRefreshAmount: 18,
             reservoirRefreshInterval: 60000
         };
+        this.chunkSize = 15 * 60 - 10; // 14 minutes 50 seconds
 
         const config = {
             'whisper-1': {
@@ -36,7 +40,59 @@ class WhisperMix {
 
     async fromFile(filePath) {
         const absolutePath = path.resolve(filePath);
-        return this.fromStream(fs.createReadStream(absolutePath));
+        const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'whispermix-chunks-'));
+
+        try {
+            const duration = await getAudioDurationInSeconds(absolutePath);
+
+            if (duration <= this.chunkSize) {
+                // Process as a single file
+                return this.fromStream(fs.createReadStream(absolutePath));
+            } else {
+                // Split audio and process chunks
+                let accumulatedTranscription = "";
+                const numChunks = Math.ceil(duration / this.chunkSize);
+
+                for (let i = 0; i < numChunks; i++) {
+                    const chunkPath = path.join(tempDir, `chunk-${i}.mp3`);
+                    const startTime = i * this.chunkSize;
+                    
+                    await new Promise((resolve, reject) => {
+                        ffmpeg(absolutePath)
+                            .setStartTime(startTime)
+                            .setDuration(this.chunkSize)
+                            .output(chunkPath)
+                            .on('end', () => {
+                                resolve();
+                            })
+                            .on('error', (err) => {
+                                console.error(`Error creating chunk ${i + 1}:`, err);
+                                reject(err);
+                            })
+                            .run();
+                    });
+
+                    const chunkStream = fs.createReadStream(chunkPath);
+                    const transcription = await this.fromStream(chunkStream);
+                    accumulatedTranscription += (transcription + " ").trimStart();
+                    
+                    // Clean up chunk immediately after processing
+                    try {
+                        await fs.promises.unlink(chunkPath);
+                    } catch (unlinkErr) {
+                        console.warn(`Could not delete chunk ${chunkPath}:`, unlinkErr);
+                    }
+                }
+                return accumulatedTranscription.trim();
+            }
+        } finally {
+            // Clean up the temporary directory
+            try {
+                await fs.promises.rm(tempDir, { recursive: true, force: true });
+            } catch (rmErr) {
+                console.warn(`Could not delete temporary directory ${tempDir}:`, rmErr);
+            }
+        }
     }
 
     async fromStream(audioStream) {
