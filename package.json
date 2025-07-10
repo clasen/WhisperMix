@@ -28,7 +28,7 @@
         "chunk",
         "clasen",
         "local",
-        "whisper-local"
+        "xenova"
     ],
     "repository": {
         "type": "git",

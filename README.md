@@ -8,12 +8,6 @@ WhisperMix is a flexible module that provides an interface for transcribing audi
 npm install whispermix
 ```
 
-For local Whisper support, also install the optional dependencies:
-
-```bash
-npm install @xenova/transformers audio-decode
-```
-
 ## ⚙️ Configuration
 
 Before using WhisperMix with API-based models, you need to set up your environment variables:

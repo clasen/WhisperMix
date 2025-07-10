@@ -13,7 +13,7 @@ import audioDecode from 'audio-decode';
 
 class WhisperMix {
     constructor(setup = {}) {
-        this.model = 'whisper-1';
+        this.model = 'openai';
         this.bottleneck = {
             minTime: 2000,
             maxConcurrent: 1,
@@ -26,10 +26,12 @@ class WhisperMix {
         const config = {
             'openai': {
                 url: 'https://api.openai.com/v1/audio/transcriptions',
+                modelName: 'whisper-1',
                 apiKey: process.env.OPENAI_API_KEY,
             },
             'groq/large-v3': {
                 url: 'https://api.groq.com/openai/v1/audio/transcriptions',
+                modelName: 'whisper-large-v3',
                 apiKey: process.env.GROQ_API_KEY,
             },
             'xenova/large-v3': {
@@ -55,6 +57,14 @@ class WhisperMix {
 
     async fromFile(filePath) {
         const absolutePath = path.resolve(filePath);
+        
+        // Check if file exists
+        try {
+            await fs.promises.access(absolutePath, fs.constants.F_OK);
+        } catch (error) {
+            throw new Error(`File not found: ${absolutePath}`);
+        }
+        
         const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'whispermix-chunks-'));
 
         try {
@@ -127,7 +137,7 @@ class WhisperMix {
         return this.limiter.schedule(() => new Promise((resolve, reject) => {
             const formData = new FormData();
             formData.append('file', audioStream);
-            formData.append('model', this.model);
+            formData.append('model', this.modelName);
 
             this._makeRequest(formData)
                 .then(resolve)
