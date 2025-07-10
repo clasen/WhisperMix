@@ -1,12 +1,17 @@
-require('dotenv').config();
-const WhisperMix = require('../index.js')
+import 'dotenv/config';
+import WhisperMix from '../index.js';
 
 const transcribe = new WhisperMix({ model: 'whisper-large-v3' });
 
-main(); async function main() {
+async function main() {
     for (let i = 0; i < 10; i++) {
-        transcribe.fromFile('./example.mp3')
-            .then(console.log)
-            .catch(console.error);
+        try {
+            const result = await transcribe.fromFile('./example.mp3');
+            console.log(`${i}/10`, result);
+        } catch (error) {
+            console.error(error);
+        }
     }
 }
+
+main();
