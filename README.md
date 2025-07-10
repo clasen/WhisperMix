@@ -106,7 +106,7 @@ You can adjust these settings based on your specific rate limiting needs. Note t
 
 Creates a new WhisperMix instance.
 
-- `options.model`: The model to use for transcription. Can be 'whisper-1' (OpenAI), 'whisper-large-v3' (Groq), or 'whisper-local' (local).
+- `options.model`: The model to use for transcription. Can be 'openai' (OpenAI), 'groq/large-v3' (Groq), or 'xenova/large-v3' (local).
 - `options.bottleneck`: (Optional) Configuration for Bottleneck rate limiting (API models only).
 - `options.chunkSize`: (Optional) The size in seconds of the chunks to split the audio into. Default is 890 seconds.
 - `options.language`: (Optional) Language for local Whisper model. Defaults to 'auto' for automatic detection.
