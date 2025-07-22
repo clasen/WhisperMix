@@ -126,17 +126,6 @@ Transcribes audio from a stream.
 
 Returns a Promise that resolves with the transcription text.
 
-**Note:** Only available for API-based models (OpenAI and Groq). Local Whisper models will throw an error.
-
-## ⚠️ Error Handling
-
-WhisperMix throws errors for API request failures and local processing issues. Always wrap your calls in try-catch blocks or use `.catch()` with promises to handle potential errors.
-
-For local Whisper models, ensure you have the required dependencies installed:
-```bash
-npm install @xenova/transformers audio-decode
-```
-
 ## 📄 License
 
 The MIT License (MIT)
