@@ -1,7 +1,7 @@
 {
     "name": "whispermix",
     "description": "🎙️ WhisperMix is a versatile module for transcribing audio using OpenAI’s Whisper or Groq’s Whisper v3 model.",
-    "version": "1.3.8",
+    "version": "1.4.0",
     "type": "module",
     "keywords": [
         "whisper",
