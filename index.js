@@ -13,7 +13,7 @@ import audioDecode from 'audio-decode';
 
 class WhisperMix {
     constructor(setup = {}) {
-        this.model = 'openai';
+        this.model = 'openai/whisper-1';
         this.bottleneck = {
             minTime: 2000,
             maxConcurrent: 1,
@@ -24,21 +24,21 @@ class WhisperMix {
         this.chunkSize = 15 * 60 - 10; // 14 minutes 50 seconds
         
         const config = {
-            'openai': {
+            'openai/whisper-1': {
                 url: 'https://api.openai.com/v1/audio/transcriptions',
                 modelName: 'whisper-1',
                 apiKey: process.env.OPENAI_API_KEY,
             },
-            'groq/large-v3': {
+            'groq/whisper-large-v3': {
                 url: 'https://api.groq.com/openai/v1/audio/transcriptions',
                 modelName: 'whisper-large-v3',
                 apiKey: process.env.GROQ_API_KEY,
             },
-            'xenova/large-v3': {
+            'xenova/whisper-large-v3': {
                 local: true,
                 modelName: 'Xenova/whisper-large-v3',
             },
-            'xenova/base': {
+            'xenova/whisper-base': {
                 local: true,
                 modelName: 'Xenova/whisper-base',
             },            
@@ -47,6 +47,9 @@ class WhisperMix {
         Object.assign(this, setup);
 
         this.config = config[this.model];
+        if (!this.config) {
+            throw new Error(`Unknown model: "${this.model}". Valid models: ${Object.keys(config).join(', ')}`);
+        }
         this.apiKey = this.apiKey || this.config.apiKey;
         this.apiUrl = this.config.url;
         this.isLocal = this.config.local || false;

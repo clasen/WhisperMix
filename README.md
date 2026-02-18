@@ -29,11 +29,13 @@ import WhisperMix from 'whispermix';
 You can initialize WhisperMix with a specific model:
 
 ```javascript
-const whisper = new WhisperMix({ model: 'openai' }); // For OpenAI's Whisper
+const whisper = new WhisperMix({ model: 'openai/whisper-1' }); // For OpenAI's Whisper
 // or
-const whisperGroq = new WhisperMix({ model: 'groq/large-v3' }); // For Groq's Whisper Large v3
+const whisperGroq = new WhisperMix({ model: 'groq/whisper-large-v3' }); // For Groq's Whisper Large v3
 // or
-const whisperLocal = new WhisperMix({ model: 'xenova/large-v3' }); // For local Whisper
+const whisperLocal = new WhisperMix({ model: 'xenova/whisper-large-v3' }); // For local Whisper (large)
+// or
+const whisperLocalBase = new WhisperMix({ model: 'xenova/whisper-base' }); // For local Whisper (base)
 ```
 
 ### 📄 Transcribing from a File
@@ -46,7 +48,7 @@ whisperGroq.fromFile(filePath)
 
 // For local Whisper with language specification
 const whisperLocal = new WhisperMix({ 
-  model: 'xenova/large-v3',
+  model: 'xenova/whisper-large-v3',
   language: 'spanish' // Optional
 });
 whisperLocal.fromFile(filePath)
@@ -79,7 +81,7 @@ WhisperMix uses Bottleneck for rate limiting API-based models. You can configure
 
 ```javascript
 const whisper = new WhisperMix({
-  model: 'whisper-1',
+  model: 'openai/whisper-1',
   bottleneck: {
     minTime: 3000,
     maxConcurrent: 1,
@@ -106,7 +108,7 @@ You can adjust these settings based on your specific rate limiting needs. Note t
 
 Creates a new WhisperMix instance.
 
-- `options.model`: The model to use for transcription. Can be 'openai' (OpenAI), 'groq/large-v3' (Groq), or 'xenova/large-v3' (local).
+- `options.model`: The model to use for transcription. Can be `'openai/whisper-1'` (OpenAI), `'groq/whisper-large-v3'` (Groq), `'xenova/whisper-large-v3'` or `'xenova/whisper-base'` (local).
 - `options.bottleneck`: (Optional) Configuration for Bottleneck rate limiting (API models only).
 - `options.chunkSize`: (Optional) The size in seconds of the chunks to split the audio into. Default is 890 seconds.
 - `options.language`: (Optional) Language for local Whisper model. Defaults to 'auto' for automatic detection.
