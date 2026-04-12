@@ -1,5 +1,3 @@
-import axios from 'axios';
-import FormData from 'form-data';
 import fs from 'fs';
 import Bottleneck from 'bottleneck';
 import path from 'path';
@@ -136,29 +134,40 @@ class WhisperMix {
         if (this.isLocal) {
             throw new Error('fromStream is not supported for local Whisper model. Use fromFile instead.');
         }
-        
-        return this.limiter.schedule(() => new Promise((resolve, reject) => {
-            const formData = new FormData();
-            formData.append('file', audioStream);
-            formData.append('model', this.modelName);
 
-            this._makeRequest(formData)
-                .then(resolve)
-                .catch(reject);
-        }));
+        const chunks = [];
+        for await (const chunk of audioStream) {
+            chunks.push(chunk);
+        }
+        const buffer = Buffer.concat(chunks);
+
+        return this.limiter.schedule(() => this._makeRequest(buffer));
     }
 
-    async _makeRequest(formData) {
+    async _makeRequest(buffer) {
         try {
-            const response = await axios.post(this.apiUrl, formData, {
+            const blob = new Blob([buffer], { type: 'audio/mpeg' });
+            const formData = new FormData();
+            formData.append('file', blob, 'audio.mp3');
+            formData.append('model', this.modelName);
+
+            const response = await fetch(this.apiUrl, {
+                method: 'POST',
                 headers: {
-                    ...formData.getHeaders(),
                     'Authorization': `Bearer ${this.apiKey}`,
                 },
+                body: formData,
             });
-            return response.data.text.trim();
+
+            const responseData = await response.json();
+
+            if (!response.ok) {
+                throw responseData;
+            }
+
+            return responseData.text.trim();
         } catch (error) {
-            throw error.response ? error.response.data : error.message;
+            throw error?.message || error;
         }
     }
 
