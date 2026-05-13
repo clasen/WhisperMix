@@ -1,7 +1,9 @@
 import WhisperMix from '../index.js';
 
 const whisperLocal = new WhisperMix({
-    model: 'xenova/whisper-large-v3'
+    model: 'xenova/whisper-large-v3',
+    showProgress: true,
+    language: 'spanish',
 });
 
 const r = await whisperLocal.fromFile('conversation.wav');

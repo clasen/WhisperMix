@@ -1,0 +1,5 @@
+allowBuilds:
+  '@ffprobe-installer/darwin-arm64': true
+  onnxruntime-node: true
+  protobufjs: true
+  sharp: true

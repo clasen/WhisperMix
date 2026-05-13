@@ -6,7 +6,7 @@ import { getAudioDurationInSeconds } from 'get-audio-duration';
 import os from 'os'; // For temporary directory
 
 // Static imports for local dependencies
-import { pipeline } from '@xenova/transformers';
+import { pipeline, env } from '@huggingface/transformers';
 import audioDecode from 'audio-decode';
 
 class WhisperMix {
@@ -35,10 +35,12 @@ class WhisperMix {
             'xenova/whisper-large-v3': {
                 local: true,
                 modelName: 'Xenova/whisper-large-v3',
+                dtype: 'q8',
             },
             'xenova/whisper-base': {
                 local: true,
                 modelName: 'Xenova/whisper-base',
+                dtype: 'q8',
             },            
         };
 
@@ -52,6 +54,9 @@ class WhisperMix {
         this.apiUrl = this.config.url;
         this.isLocal = this.config.local || false;
         this.modelName = this.config.modelName;
+        this.dtype = this.dtype || this.config.dtype;
+        this.showProgress = this.showProgress || false;
+        this.transcriber = null;
 
         this.limiter = new Bottleneck(this.bottleneck);
     }
@@ -150,6 +155,9 @@ class WhisperMix {
             const formData = new FormData();
             formData.append('file', blob, 'audio.mp3');
             formData.append('model', this.modelName);
+            if (this.language) {
+                formData.append('language', this.language);
+            }
 
             const response = await fetch(this.apiUrl, {
                 method: 'POST',
@@ -201,19 +209,45 @@ class WhisperMix {
                 audioData = resampledData;
             }
 
-            // Create the transcriber pipeline
-            const transcriber = await pipeline('automatic-speech-recognition', this.modelName);
+            // Reuse a single pipeline instance so repeated calls don't re-download/re-initialize.
+            const transcriber = await this._getLocalTranscriber();
 
             // Pass the processed audio data
-            const result = await transcriber(audioData, {
-                language: this.language,
+            const transcriberOptions = {
                 task: 'transcribe',
-            });
+            };
+            if (this.language !== undefined) {
+                transcriberOptions.language = this.language;
+            }
+            const result = await transcriber(audioData, transcriberOptions);
 
             return result.text.trim();
         } catch (error) {
-            throw new Error(`Local transcription failed: ${error.message}`);
+            throw new Error(`Local transcription failed: ${error.message}. If this happened after an interrupted download, remove the model cache at ${env.cacheDir}${this.modelName}/ and try again.`);
         }
+    }
+
+    async _getLocalTranscriber() {
+        if (!this.transcriber) {
+            const options = {};
+            if (this.dtype) {
+                options.dtype = this.dtype;
+            }
+            if (this.showProgress) {
+                options.progress_callback = (event) => {
+                    if (!event || !event.status) return;
+                    if (event.file && typeof event.progress === 'number') {
+                        console.log(`[WhisperMix] ${event.status} ${event.file} ${event.progress.toFixed(1)}%`);
+                        return;
+                    }
+                    console.log(`[WhisperMix] ${event.status}`);
+                };
+            }
+
+            this.transcriber = pipeline('automatic-speech-recognition', this.modelName, options);
+        }
+
+        return this.transcriber;
     }
 }
 
