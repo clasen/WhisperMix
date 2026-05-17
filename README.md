@@ -1,6 +1,6 @@
 # 🎙️ WhisperMix
 
-WhisperMix is a flexible module that provides an interface for transcribing audio using OpenAI's Whisper model, Groq's Whisper Large v3 model, or local Whisper models.
+WhisperMix is a flexible module that provides an interface for transcribing audio using OpenAI's Whisper model, Groq's Whisper Large v3 model, local Whisper models, or local Parakeet TDT v3 models.
 
 ## 📦 Installation
 
@@ -36,6 +36,12 @@ const whisperGroq = new WhisperMix({ model: 'groq/whisper-large-v3' }); // For G
 const whisperLocal = new WhisperMix({ model: 'xenova/whisper-large-v3' }); // For local Whisper (large)
 // or
 const whisperLocalBase = new WhisperMix({ model: 'xenova/whisper-base' }); // For local Whisper (base)
+// or
+const whisperParakeet = new WhisperMix({ model: 'istupakov/parakeet-tdt-0.6b-v3' }); // For local Parakeet v3 (int8)
+// or
+const whisperParakeetInt4 = new WhisperMix({ model: 'efederici/parakeet-tdt-0.6b-v3-int4' }); // For local Parakeet v3 (int4 encoder)
+// or
+const whisperParakeetAlt = new WhisperMix({ model: 'nasedkinpv/parakeet-tdt-0.6b-v3-int8' }); // For local Parakeet v3 (alt int8 repo)
 ```
 
 ### 📄 Transcribing from a File
@@ -67,7 +73,24 @@ whisperGroq.fromStream(audioStream)
   .catch(error => console.error(error));
 ```
 
-**Note:** Stream transcription is only available for API-based models (OpenAI and Groq). Local Whisper models require file input.
+**Note:** Stream transcription is only available for API-based models (OpenAI and Groq). Local models (Whisper and Parakeet) require file input.
+
+### 🐦 Parakeet local models
+
+Parakeet TDT v3 local models are downloaded once and cached in:
+
+`~/.cache/whispermix/parakeet/<modelKey>/`
+
+Available local Parakeet model keys:
+
+- `istupakov/parakeet-tdt-0.6b-v3` (about 670 MB, int8)
+- `efederici/parakeet-tdt-0.6b-v3-int4` (about 410 MB, int4/int8 hybrid)
+- `nasedkinpv/parakeet-tdt-0.6b-v3-int8` (about 890 MB, int8)
+
+Notes:
+
+- Parakeet TDT v3 is multilingual (25 European languages).
+- `language` is ignored for Parakeet local models.
 
 ### ⏱️ Long Audio Processing
 
@@ -108,7 +131,7 @@ You can adjust these settings based on your specific rate limiting needs. Note t
 
 Creates a new WhisperMix instance.
 
-- `options.model`: The model to use for transcription. Can be `'openai/whisper-1'` (OpenAI), `'groq/whisper-large-v3'` (Groq), `'xenova/whisper-large-v3'` or `'xenova/whisper-base'` (local).
+- `options.model`: The model to use for transcription. Can be `'openai/whisper-1'` (OpenAI), `'groq/whisper-large-v3'` (Groq), `'xenova/whisper-large-v3'` or `'xenova/whisper-base'` (local Whisper), `'istupakov/parakeet-tdt-0.6b-v3'`, `'efederici/parakeet-tdt-0.6b-v3-int4'`, or `'nasedkinpv/parakeet-tdt-0.6b-v3-int8'` (local Parakeet).
 - `options.bottleneck`: (Optional) Configuration for Bottleneck rate limiting (API models only).
 - `options.chunkSize`: (Optional) The size in seconds of the chunks to split the audio into. Default is 890 seconds.
 - `options.language`: (Optional) Language for local Whisper model. Defaults to 'auto' for automatic detection.

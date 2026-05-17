@@ -4,10 +4,51 @@ import path from 'path';
 import ffmpeg from 'fluent-ffmpeg';
 import { getAudioDurationInSeconds } from 'get-audio-duration';
 import os from 'os'; // For temporary directory
+import { Readable } from 'stream';
+import { pipeline as streamPipeline } from 'stream/promises';
 
 // Static imports for local dependencies
-import { pipeline, env } from '@huggingface/transformers';
+import { pipeline as hfPipeline, env } from '@huggingface/transformers';
 import audioDecode from 'audio-decode';
+
+const PARAKEET_LAYOUTS = {
+    'istupakov/parakeet-tdt-0.6b-v3': {
+        cacheKey: 'istupakov-parakeet-tdt-0.6b-v3',
+        repo: 'istupakov/parakeet-tdt-0.6b-v3-onnx',
+        files: [
+            { src: 'config.json', dst: 'config.json' },
+            { src: 'nemo128.onnx', dst: 'nemo128.onnx' },
+            { src: 'encoder-model.int8.onnx', dst: 'encoder-model.int8.onnx' },
+            { src: 'decoder_joint-model.int8.onnx', dst: 'decoder_joint-model.int8.onnx' },
+            { src: 'vocab.txt', dst: 'vocab.txt' },
+        ],
+    },
+    'efederici/parakeet-tdt-0.6b-v3-int4': {
+        cacheKey: 'efederici-parakeet-tdt-0.6b-v3-int4',
+        repo: 'efederici/parakeet-tdt-0.6b-v3-onnx-int4',
+        files: [
+            { src: 'config.json', dst: 'config.json' },
+            { src: 'nemo128.onnx', dst: 'nemo128.onnx' },
+            { src: 'encoder-model.int4.onnx', dst: 'encoder-model.int8.onnx' },
+            { src: 'decoder_joint-model.int8.onnx', dst: 'decoder_joint-model.int8.onnx' },
+            { src: 'vocab.txt', dst: 'vocab.txt' },
+        ],
+    },
+    'nasedkinpv/parakeet-tdt-0.6b-v3-int8': {
+        cacheKey: 'nasedkinpv-parakeet-tdt-0.6b-v3-int8',
+        repo: 'nasedkinpv/parakeet-tdt-0.6b-v3-onnx-int8',
+        files: [
+            { src: 'encoder-int8.onnx', dst: 'encoder-model.int8.onnx' },
+            { src: 'encoder-int8.onnx.data', dst: 'encoder-model.int8.onnx.data' },
+            { src: 'decoder_joint-int8.onnx', dst: 'decoder_joint-model.int8.onnx' },
+            { src: 'vocab.txt', dst: 'vocab.txt' },
+            { srcRepo: 'istupakov/parakeet-tdt-0.6b-v3-onnx', src: 'nemo128.onnx', dst: 'nemo128.onnx' },
+        ],
+        synthConfig: {
+            model_type: 'nemo-conformer-tdt',
+        },
+    },
+};
 
 class WhisperMix {
     constructor(setup = {}) {
@@ -41,7 +82,26 @@ class WhisperMix {
                 local: true,
                 modelName: 'Xenova/whisper-base',
                 dtype: 'q8',
-            },            
+                backend: 'transformers',
+            },
+            'istupakov/parakeet-tdt-0.6b-v3': {
+                local: true,
+                modelName: 'Parakeet-TDT-0.6B-v3',
+                backend: 'onnx-asr-web',
+                layout: PARAKEET_LAYOUTS['istupakov/parakeet-tdt-0.6b-v3'],
+            },
+            'efederici/parakeet-tdt-0.6b-v3-int4': {
+                local: true,
+                modelName: 'Parakeet-TDT-0.6B-v3-int4',
+                backend: 'onnx-asr-web',
+                layout: PARAKEET_LAYOUTS['efederici/parakeet-tdt-0.6b-v3-int4'],
+            },
+            'nasedkinpv/parakeet-tdt-0.6b-v3-int8': {
+                local: true,
+                modelName: 'Parakeet-TDT-0.6B-v3-int8',
+                backend: 'onnx-asr-web',
+                layout: PARAKEET_LAYOUTS['nasedkinpv/parakeet-tdt-0.6b-v3-int8'],
+            },
         };
 
         Object.assign(this, setup);
@@ -56,7 +116,11 @@ class WhisperMix {
         this.modelName = this.config.modelName;
         this.dtype = this.dtype || this.config.dtype;
         this.showProgress = this.showProgress || false;
+        this.localBackend = this.config.backend || 'transformers';
+        this.layout = this.config.layout;
         this.transcriber = null;
+        this._onnxAsrNodeModule = null;
+        this._warnedParakeetLanguage = false;
 
         this.limiter = new Bottleneck(this.bottleneck);
     }
@@ -212,6 +276,19 @@ class WhisperMix {
             // Reuse a single pipeline instance so repeated calls don't re-download/re-initialize.
             const transcriber = await this._getLocalTranscriber();
 
+            if (this.localBackend === 'onnx-asr-web') {
+                if (this.language !== undefined && this.showProgress && !this._warnedParakeetLanguage) {
+                    console.log('[WhisperMix] "language" option is ignored for Parakeet local models.');
+                    this._warnedParakeetLanguage = true;
+                }
+                const result = await transcriber.transcribeSamples(audioData, 16000);
+                const text = result?.text || result?.utterance_text;
+                if (typeof text !== 'string') {
+                    throw new Error('Parakeet transcription returned no text output.');
+                }
+                return text.trim();
+            }
+
             // Pass the processed audio data
             const transcriberOptions = {
                 task: 'transcribe',
@@ -220,15 +297,32 @@ class WhisperMix {
                 transcriberOptions.language = this.language;
             }
             const result = await transcriber(audioData, transcriberOptions);
-
             return result.text.trim();
         } catch (error) {
-            throw new Error(`Local transcription failed: ${error.message}. If this happened after an interrupted download, remove the model cache at ${env.cacheDir}${this.modelName}/ and try again.`);
+            const cacheHint = this.localBackend === 'onnx-asr-web'
+                ? this._getParakeetCacheDir(this.layout)
+                : `${env.cacheDir}${this.modelName}/`;
+            throw new Error(`Local transcription failed: ${error.message}. If this happened after an interrupted download, remove the model cache at ${cacheHint} and try again.`);
         }
     }
 
     async _getLocalTranscriber() {
         if (!this.transcriber) {
+            if (this.localBackend === 'onnx-asr-web') {
+                if (!this.layout) {
+                    throw new Error(`Missing Parakeet layout for model: ${this.model}`);
+                }
+                const modelDir = await this._ensureParakeetAssets(this.layout);
+                const { loadLocalModel } = await this._getOnnxAsrNodeModule();
+                this.transcriber = await loadLocalModel(modelDir, {
+                    quantization: 'int8',
+                    sessionOptions: {
+                        executionProviders: ['wasm'],
+                    },
+                });
+                return this.transcriber;
+            }
+
             const options = {};
             if (this.dtype) {
                 options.dtype = this.dtype;
@@ -244,10 +338,89 @@ class WhisperMix {
                 };
             }
 
-            this.transcriber = pipeline('automatic-speech-recognition', this.modelName, options);
+            this.transcriber = hfPipeline('automatic-speech-recognition', this.modelName, options);
         }
 
         return this.transcriber;
+    }
+
+    async _getOnnxAsrNodeModule() {
+        if (!this._onnxAsrNodeModule) {
+            this._onnxAsrNodeModule = await import('onnx-asr-web/node');
+        }
+        return this._onnxAsrNodeModule;
+    }
+
+    _getParakeetCacheDir(layout) {
+        if (this.cacheDir) {
+            return path.resolve(this.cacheDir);
+        }
+        if (!layout?.cacheKey) {
+            throw new Error(`Missing cache key for Parakeet layout: ${this.model}`);
+        }
+        return path.join(os.homedir(), '.cache', 'whispermix', 'parakeet', layout.cacheKey);
+    }
+
+    async _ensureParakeetAssets(layout) {
+        const cacheDir = this._getParakeetCacheDir(layout);
+        await fs.promises.mkdir(cacheDir, { recursive: true });
+
+        for (const fileDef of layout.files) {
+            const destination = path.join(cacheDir, fileDef.dst);
+            const sourceRepo = fileDef.srcRepo || layout.repo;
+
+            if (await this._hasFileWithContent(destination)) {
+                continue;
+            }
+
+            const sourceUrl = `https://huggingface.co/${sourceRepo}/resolve/main/${fileDef.src}`;
+            if (this.showProgress) {
+                console.log(`[WhisperMix] Downloading ${fileDef.src} from ${sourceRepo}`);
+            }
+            await this._downloadToFile(sourceUrl, destination);
+        }
+
+        if (layout.synthConfig) {
+            const configPath = path.join(cacheDir, 'config.json');
+            if (!(await this._hasFileWithContent(configPath))) {
+                await fs.promises.writeFile(configPath, JSON.stringify(layout.synthConfig, null, 2));
+            }
+        }
+
+        return cacheDir;
+    }
+
+    async _hasFileWithContent(filePath) {
+        try {
+            const stats = await fs.promises.stat(filePath);
+            return stats.isFile() && stats.size > 0;
+        } catch {
+            return false;
+        }
+    }
+
+    async _downloadToFile(url, filePath) {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Download failed (${response.status} ${response.statusText}) for ${url}`);
+        }
+        if (!response.body) {
+            throw new Error(`Empty response body while downloading ${url}`);
+        }
+
+        await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+        const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+
+        try {
+            await streamPipeline(
+                Readable.fromWeb(response.body),
+                fs.createWriteStream(tempPath),
+            );
+            await fs.promises.rename(tempPath, filePath);
+        } catch (error) {
+            await fs.promises.rm(tempPath, { force: true });
+            throw error;
+        }
     }
 }
 
