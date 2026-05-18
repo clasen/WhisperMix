@@ -25,6 +25,7 @@ Constraints to surface before coding:
 - API models need `OPENAI_API_KEY` or `GROQ_API_KEY` in the environment.
 - First Parakeet run downloads weights to `~/.cache/whispermix/parakeet/<modelKey>/` — warn the user.
 - Requires `ffmpeg` on `PATH` for long-audio chunking (>15 min split automatically).
+- `wordTimestamps: true` changes the return value from plain text to `{ text, words }`, where each word has `start` and `end` times in seconds.
 
 ## API
 
@@ -49,6 +50,7 @@ Constructor options:
 - `chunkSize` — seconds per chunk for long audio. Default `890` (~14m50s).
 - `bottleneck` — Bottleneck config for API models. Defaults: `minTime: 3000`, `maxConcurrent: 1`, `reservoir: 18`, `reservoirRefreshAmount: 18`, `reservoirRefreshInterval: 60000`.
 - `showProgress` — boolean, prints chunk/decoding progress.
+- `wordTimestamps` — boolean, returns `{ text, words }` instead of a string. Can also be passed per call to `fromFile(filePath, { wordTimestamps: true })` or `fromStream(stream, { wordTimestamps: true })`.
 
 ## Examples
 
@@ -69,6 +71,16 @@ const w = new WhisperMix({
     bottleneck: { minTime: 4000, maxConcurrent: 1 },
 });
 console.log(await w.fromFile('podcast.mp3'));
+```
+
+Word-level timestamps:
+
+```javascript
+import WhisperMix from 'whispermix';
+const w = new WhisperMix({ model: 'openai/whisper-1' });
+const result = await w.fromFile('meeting.mp3', { wordTimestamps: true });
+console.log(result.text);
+console.log(result.words); // [{ word, start, end }, ...]
 ```
 
 Local Whisper, fixed language:

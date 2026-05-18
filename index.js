@@ -125,7 +125,8 @@ class WhisperMix {
         this.limiter = new Bottleneck(this.bottleneck);
     }
 
-    async fromFile(filePath) {
+    async fromFile(filePath, options = {}) {
+        const transcriptionOptions = this._resolveTranscriptionOptions(options);
         const absolutePath = path.resolve(filePath);
         
         // Check if file exists
@@ -142,14 +143,10 @@ class WhisperMix {
 
             if (duration <= this.chunkSize) {
                 // Process as a single file
-                if (this.isLocal) {
-                    return this._transcribeLocalFile(absolutePath);
-                } else {
-                    return this.fromStream(fs.createReadStream(absolutePath));
-                }
+                return this._transcribeFilePath(absolutePath, transcriptionOptions);
             } else {
                 // Split audio and process chunks
-                let accumulatedTranscription = "";
+                const transcriptions = [];
                 const numChunks = Math.ceil(duration / this.chunkSize);
 
                 for (let i = 0; i < numChunks; i++) {
@@ -171,14 +168,8 @@ class WhisperMix {
                             .run();
                     });
 
-                    let transcription;
-                    if (this.isLocal) {
-                        transcription = await this._transcribeLocalFile(chunkPath);
-                    } else {
-                        const chunkStream = fs.createReadStream(chunkPath);
-                        transcription = await this.fromStream(chunkStream);
-                    }
-                    accumulatedTranscription += (transcription + " ").trimStart();
+                    const transcription = await this._transcribeFilePath(chunkPath, transcriptionOptions);
+                    transcriptions.push(this._offsetTranscription(transcription, startTime));
                     
                     // Clean up chunk immediately after processing
                     try {
@@ -187,7 +178,7 @@ class WhisperMix {
                         console.warn(`Could not delete chunk ${chunkPath}:`, unlinkErr);
                     }
                 }
-                return accumulatedTranscription.trim();
+                return this._mergeTranscriptions(transcriptions, transcriptionOptions, duration);
             }
         } finally {
             // Clean up the temporary directory
@@ -199,10 +190,18 @@ class WhisperMix {
         }
     }
 
-    async fromStream(audioStream) {
+    async _transcribeFilePath(filePath, options) {
+        if (this.isLocal) {
+            return this._transcribeLocalFile(filePath, options);
+        }
+        return this.fromStream(fs.createReadStream(filePath), options);
+    }
+
+    async fromStream(audioStream, options = {}) {
         if (this.isLocal) {
             throw new Error('fromStream is not supported for local Whisper model. Use fromFile instead.');
         }
+        const transcriptionOptions = this._resolveTranscriptionOptions(options);
 
         const chunks = [];
         for await (const chunk of audioStream) {
@@ -210,10 +209,10 @@ class WhisperMix {
         }
         const buffer = Buffer.concat(chunks);
 
-        return this.limiter.schedule(() => this._makeRequest(buffer));
+        return this.limiter.schedule(() => this._makeRequest(buffer, transcriptionOptions));
     }
 
-    async _makeRequest(buffer) {
+    async _makeRequest(buffer, options = {}) {
         try {
             const blob = new Blob([buffer], { type: 'audio/mpeg' });
             const formData = new FormData();
@@ -221,6 +220,10 @@ class WhisperMix {
             formData.append('model', this.modelName);
             if (this.language) {
                 formData.append('language', this.language);
+            }
+            if (options.wordTimestamps) {
+                formData.append('response_format', 'verbose_json');
+                formData.append('timestamp_granularities[]', 'word');
             }
 
             const response = await fetch(this.apiUrl, {
@@ -237,13 +240,13 @@ class WhisperMix {
                 throw responseData;
             }
 
-            return responseData.text.trim();
+            return this._formatApiTranscription(responseData, options);
         } catch (error) {
             throw error?.message || error;
         }
     }
 
-    async _transcribeLocalFile(filePath) {
+    async _transcribeLocalFile(filePath, options = {}) {
         try {
             // Read the audio file as a buffer
             const buffer = fs.readFileSync(filePath);
@@ -286,7 +289,7 @@ class WhisperMix {
                 if (typeof text !== 'string') {
                     throw new Error('Parakeet transcription returned no text output.');
                 }
-                return text.trim();
+                return this._formatLocalTranscription(text, result?.words, options);
             }
 
             // Pass the processed audio data
@@ -296,14 +299,159 @@ class WhisperMix {
             if (this.language !== undefined) {
                 transcriberOptions.language = this.language;
             }
+            if (options.wordTimestamps) {
+                transcriberOptions.return_timestamps = 'word';
+            }
             const result = await transcriber(audioData, transcriberOptions);
-            return result.text.trim();
+            const words = options.wordTimestamps ? this._wordsFromTransformersChunks(result.chunks) : undefined;
+            return this._formatLocalTranscription(result.text, words, options);
         } catch (error) {
             const cacheHint = this.localBackend === 'onnx-asr-web'
                 ? this._getParakeetCacheDir(this.layout)
                 : `${env.cacheDir}${this.modelName}/`;
             throw new Error(`Local transcription failed: ${error.message}. If this happened after an interrupted download, remove the model cache at ${cacheHint} and try again.`);
         }
+    }
+
+    _resolveTranscriptionOptions(options = {}) {
+        return {
+            wordTimestamps: Boolean(options.wordTimestamps ?? this.wordTimestamps),
+        };
+    }
+
+    _formatApiTranscription(responseData, options) {
+        const text = this._formatText(responseData.text);
+        if (!options.wordTimestamps) {
+            return text;
+        }
+        return {
+            ...responseData,
+            text,
+            words: this._normalizeWords(responseData.words),
+        };
+    }
+
+    _formatLocalTranscription(text, words, options) {
+        const formattedText = this._formatText(text);
+        if (!options.wordTimestamps) {
+            return formattedText;
+        }
+        return {
+            text: formattedText,
+            words: this._normalizeWords(words),
+        };
+    }
+
+    _formatText(text) {
+        if (typeof text !== 'string') {
+            throw new Error('Transcription returned no text output.');
+        }
+        return text.trim();
+    }
+
+    _wordsFromTransformersChunks(chunks) {
+        if (!Array.isArray(chunks)) {
+            return undefined;
+        }
+        return chunks.map((chunk) => ({
+            word: chunk.text,
+            timestamp: chunk.timestamp,
+        }));
+    }
+
+    _normalizeWords(words) {
+        if (!Array.isArray(words)) {
+            throw new Error('Word timestamps were requested, but the selected backend did not return word timestamps.');
+        }
+
+        return words
+            .map((word) => {
+                if (!word || typeof word !== 'object') {
+                    throw new Error('Word timestamp response contains an invalid word entry.');
+                }
+
+                const text = typeof word.word === 'string' ? word.word : word.text;
+                const start = typeof word.start === 'number' ? word.start : word.timestamp?.[0];
+                const end = typeof word.end === 'number' ? word.end : word.timestamp?.[1];
+
+                if (typeof text !== 'string' || typeof start !== 'number' || typeof end !== 'number') {
+                    throw new Error('Word timestamp response contains an invalid word entry.');
+                }
+
+                return {
+                    word: text.trim(),
+                    start,
+                    end,
+                };
+            })
+            .filter((word) => word.word.length > 0);
+    }
+
+    _mergeTranscriptions(transcriptions, options, duration) {
+        const text = transcriptions
+            .map((transcription) => this._transcriptionText(transcription))
+            .filter((chunkText) => chunkText.length > 0)
+            .join(' ')
+            .trim();
+
+        if (!options.wordTimestamps) {
+            return text;
+        }
+
+        const words = transcriptions.flatMap((transcription) => {
+            if (!Array.isArray(transcription.words)) {
+                throw new Error('Word timestamps were requested, but a chunk returned no word timestamps.');
+            }
+            return transcription.words;
+        });
+        const segments = transcriptions.flatMap((transcription) => (
+            Array.isArray(transcription.segments) ? transcription.segments : []
+        ));
+        const result = { text, words, duration };
+
+        if (segments.length > 0) {
+            result.segments = segments;
+        }
+
+        return result;
+    }
+
+    _transcriptionText(transcription) {
+        if (typeof transcription === 'string') {
+            return transcription.trim();
+        }
+        return this._formatText(transcription.text);
+    }
+
+    _offsetTranscription(transcription, offsetSeconds) {
+        if (typeof transcription === 'string' || offsetSeconds === 0) {
+            return transcription;
+        }
+
+        return {
+            ...transcription,
+            words: Array.isArray(transcription.words)
+                ? this._offsetTimedItems(transcription.words, offsetSeconds)
+                : transcription.words,
+            segments: Array.isArray(transcription.segments)
+                ? this._offsetTimedItems(transcription.segments, offsetSeconds)
+                : transcription.segments,
+        };
+    }
+
+    _offsetTimedItems(items, offsetSeconds) {
+        return items.map((item) => ({
+            ...item,
+            start: this._offsetTime(item.start, offsetSeconds),
+            end: this._offsetTime(item.end, offsetSeconds),
+        }));
+    }
+
+    _offsetTime(value, offsetSeconds) {
+        if (typeof value !== 'number') {
+            return value;
+        }
+        return Number((value + offsetSeconds).toFixed(3));
     }
 
     async _getLocalTranscriber() {

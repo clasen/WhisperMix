@@ -75,6 +75,31 @@ whisperGroq.fromStream(audioStream)
 
 **Note:** Stream transcription is only available for API-based models (OpenAI and Groq). Local models (Whisper and Parakeet) require file input.
 
+### ⏱️ Word-Level Timestamps
+
+By default, WhisperMix returns only the transcribed text. To include the start and end time for each word, pass `wordTimestamps: true` per call:
+
+```javascript
+const result = await whisperGroq.fromFile('path/to/audio.mp3', {
+  wordTimestamps: true
+});
+
+console.log(result.text);
+console.log(result.words);
+// [{ word: 'Hello', start: 0.12, end: 0.48 }, ...]
+```
+
+You can also enable it on the instance:
+
+```javascript
+const whisper = new WhisperMix({
+  model: 'openai/whisper-1',
+  wordTimestamps: true
+});
+
+const result = await whisper.fromStream(audioStream);
+```
+
 ### 🐦 Parakeet local models
 
 Parakeet TDT v3 local models are downloaded once and cached in:
@@ -135,21 +160,25 @@ Creates a new WhisperMix instance.
 - `options.bottleneck`: (Optional) Configuration for Bottleneck rate limiting (API models only).
 - `options.chunkSize`: (Optional) The size in seconds of the chunks to split the audio into. Default is 890 seconds.
 - `options.language`: (Optional) Language for local Whisper model. Defaults to 'auto' for automatic detection.
-### `whisper.fromFile(filePath)`
+- `options.wordTimestamps`: (Optional) Return `{ text, words }` instead of plain text, where each word has `start` and `end` times in seconds.
+
+### `whisper.fromFile(filePath, options)`
 
 Transcribes audio from a file.
 
 - `filePath`: Path to the audio file.
+- `options.wordTimestamps`: (Optional) Return word-level timestamps for this call.
 
-Returns a Promise that resolves with the transcription text.
+Returns a Promise that resolves with the transcription text, or `{ text, words }` when `wordTimestamps` is enabled.
 
-### `whisper.fromStream(audioStream)`
+### `whisper.fromStream(audioStream, options)`
 
 Transcribes audio from a stream.
 
 - `audioStream`: A readable stream of the audio data.
+- `options.wordTimestamps`: (Optional) Return word-level timestamps for this call.
 
-Returns a Promise that resolves with the transcription text.
+Returns a Promise that resolves with the transcription text, or `{ text, words }` when `wordTimestamps` is enabled.
 
 ## 📄 License
 
