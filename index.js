@@ -49,6 +49,7 @@ const PARAKEET_LAYOUTS = {
         },
     },
 };
+const PARAKEET_DEFAULT_CHUNK_SIZE = 40;
 
 class WhisperMix {
     constructor(setup = {}) {
@@ -118,6 +119,9 @@ class WhisperMix {
         this.showProgress = this.showProgress || false;
         this.localBackend = this.config.backend || 'transformers';
         this.layout = this.config.layout;
+        if (setup.chunkSize === undefined && this.localBackend === 'onnx-asr-web') {
+            this.chunkSize = PARAKEET_DEFAULT_CHUNK_SIZE;
+        }
         this.transcriber = null;
         this._onnxAsrNodeModule = null;
         this._warnedParakeetLanguage = false;
@@ -285,7 +289,7 @@ class WhisperMix {
                     this._warnedParakeetLanguage = true;
                 }
                 const result = await transcriber.transcribeSamples(audioData, 16000);
-                const text = result?.text || result?.utterance_text;
+                const text = result?.text ?? result?.utterance_text;
                 if (typeof text !== 'string') {
                     throw new Error('Parakeet transcription returned no text output.');
                 }
@@ -309,7 +313,10 @@ class WhisperMix {
             const cacheHint = this.localBackend === 'onnx-asr-web'
                 ? this._getParakeetCacheDir(this.layout)
                 : `${env.cacheDir}${this.modelName}/`;
-            throw new Error(`Local transcription failed: ${error.message}. If this happened after an interrupted download, remove the model cache at ${cacheHint} and try again.`);
+            const chunkHint = this.localBackend === 'onnx-asr-web' && /bad_alloc/i.test(error.message)
+                ? ` Parakeet local models should use short chunks; try chunkSize: ${PARAKEET_DEFAULT_CHUNK_SIZE} or less.`
+                : '';
+            throw new Error(`Local transcription failed: ${error.message}.${chunkHint} If this happened after an interrupted download, remove the model cache at ${cacheHint} and try again.`);
         }
     }
 
