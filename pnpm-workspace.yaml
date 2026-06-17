@@ -3,3 +3,7 @@ allowBuilds:
   onnxruntime-node: true
   protobufjs: true
   sharp: true
+minimumReleaseAgeExclude:
+  - protobufjs@7.6.3
+  - tar@7.5.16
+  - protobufjs@7.6.1
