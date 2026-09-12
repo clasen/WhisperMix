@@ -4,7 +4,7 @@ allowBuilds:
   protobufjs: true
   sharp: true
 overrides:
-  adm-zip: 0.6.0
+  adm-zip: 0.6.1
   sharp: ^0.35.3
 minimumReleaseAgeExclude:
   - protobufjs@7.6.3
