@@ -6,7 +6,7 @@ allowBuilds:
 overrides:
   'node-gyp>undici': '6.28.1'
   adm-zip: 0.6.1
-  sharp: ^0.35.3
+  sharp: ^0.35.5
 minimumReleaseAgeExclude:
   - protobufjs@7.6.3
   - tar@7.5.16
