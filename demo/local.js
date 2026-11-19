@@ -1,4 +1,4 @@
-import WhisperMix from '../index.js';
+import WhisperMix from '../index.ts';
 
 const whisperLocal = new WhisperMix({
     model: 'xenova/whisper-large-v3',

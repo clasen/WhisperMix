@@ -1,4 +1,4 @@
-import WhisperMix from '../index.js';
+import WhisperMix from '../index.ts';
 
 const whisperParakeet = new WhisperMix({
     model: 'efederici/parakeet-tdt-0.6b-v3-int4',

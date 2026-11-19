@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import WhisperMix from '../index.js';
+import WhisperMix from '../index.ts';
 
 const transcribe = new WhisperMix({ model: 'groq/whisper-large-v3' });
 

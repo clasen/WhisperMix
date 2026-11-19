@@ -6,10 +6,104 @@ import { getAudioDurationInSeconds } from 'get-audio-duration';
 import os from 'os'; // For temporary directory
 import { Readable } from 'stream';
 import { pipeline as streamPipeline } from 'stream/promises';
+import type { ReadableStream as NodeReadableStream } from 'stream/web';
 
 // Static imports for local dependencies
 import { pipeline as hfPipeline, env } from '@huggingface/transformers';
 import audioDecode from 'audio-decode';
+
+export type WhisperMixModel =
+    | 'openai/whisper-1'
+    | 'groq/whisper-large-v3'
+    | 'xenova/whisper-large-v3'
+    | 'xenova/whisper-base'
+    | 'istupakov/parakeet-tdt-0.6b-v3'
+    | 'efederici/parakeet-tdt-0.6b-v3-int4'
+    | 'nasedkinpv/parakeet-tdt-0.6b-v3-int8';
+
+export interface WhisperMixOptions {
+    model?: WhisperMixModel;
+    apiKey?: string;
+    language?: string;
+    /** Maximum chunk length in seconds. */
+    chunkSize?: number;
+    bottleneck?: Bottleneck.ConstructorOptions;
+    dtype?: string;
+    showProgress?: boolean;
+    wordTimestamps?: boolean;
+    cacheDir?: string;
+}
+
+export interface TranscriptionOptions {
+    wordTimestamps?: boolean;
+}
+
+export interface TranscriptionWord {
+    word: string;
+    start: number;
+    end: number;
+}
+
+export interface TranscriptionSegment {
+    start?: number;
+    end?: number;
+    [key: string]: unknown;
+}
+
+export interface TimedTranscription {
+    text: string;
+    words: TranscriptionWord[];
+    segments?: TranscriptionSegment[];
+    duration?: number;
+    [key: string]: unknown;
+}
+
+/** Plain text, or a timed result when `wordTimestamps` is enabled. */
+export type Transcription = string | TimedTranscription;
+
+type LocalBackend = 'transformers' | 'onnx-asr-web';
+
+interface ParakeetFile {
+    src: string;
+    dst: string;
+    srcRepo?: string;
+}
+
+interface ParakeetLayout {
+    cacheKey: string;
+    repo: string;
+    files: ParakeetFile[];
+    synthConfig?: Record<string, unknown>;
+}
+
+interface ModelConfig {
+    modelName: string;
+    url?: string;
+    apiKey?: string;
+    local?: boolean;
+    dtype?: string;
+    backend?: LocalBackend;
+    layout?: ParakeetLayout;
+}
+
+interface ResolvedTranscriptionOptions {
+    wordTimestamps: boolean;
+}
+
+interface ParakeetTranscriber {
+    transcribeSamples(samples: Float32Array, sampleRate: number): Promise<{
+        text?: unknown;
+        utterance_text?: unknown;
+        words?: unknown;
+    }>;
+}
+
+type TransformersTranscriber = (
+    audio: Float32Array,
+    options: Record<string, unknown>,
+) => Promise<{ text: string; chunks?: unknown }>;
+
+type OnnxAsrNodeModule = typeof import('onnx-asr-web/node');
 
 const PARAKEET_LAYOUTS = {
     'istupakov/parakeet-tdt-0.6b-v3': {
@@ -48,11 +142,35 @@ const PARAKEET_LAYOUTS = {
             model_type: 'nemo-conformer-tdt',
         },
     },
-};
+} satisfies Record<string, ParakeetLayout>;
 const PARAKEET_DEFAULT_CHUNK_SIZE = 40;
 
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
 class WhisperMix {
-    constructor(setup = {}) {
+    model: WhisperMixModel;
+    bottleneck: Bottleneck.ConstructorOptions;
+    chunkSize: number;
+    apiKey?: string;
+    apiUrl?: string;
+    language?: string;
+    dtype?: string;
+    showProgress: boolean;
+    wordTimestamps?: boolean;
+    cacheDir?: string;
+    config: ModelConfig;
+    isLocal: boolean;
+    modelName: string;
+    localBackend: LocalBackend;
+    layout?: ParakeetLayout;
+    transcriber: ParakeetTranscriber | Promise<TransformersTranscriber> | null;
+    limiter: Bottleneck;
+    _onnxAsrNodeModule: OnnxAsrNodeModule | null;
+    _warnedParakeetLanguage: boolean;
+
+    constructor(setup: WhisperMixOptions = {}) {
         this.model = 'openai/whisper-1';
         this.bottleneck = {
             minTime: 2000,
@@ -62,8 +180,8 @@ class WhisperMix {
             reservoirRefreshInterval: 60000
         };
         this.chunkSize = 15 * 60 - 10; // 14 minutes 50 seconds
-        
-        const config = {
+
+        const config: Record<WhisperMixModel, ModelConfig> = {
             'openai/whisper-1': {
                 url: 'https://api.openai.com/v1/audio/transcriptions',
                 modelName: 'whisper-1',
@@ -116,7 +234,7 @@ class WhisperMix {
         this.isLocal = this.config.local || false;
         this.modelName = this.config.modelName;
         this.dtype = this.dtype || this.config.dtype;
-        this.showProgress = this.showProgress || false;
+        this.showProgress = setup.showProgress || false;
         this.localBackend = this.config.backend || 'transformers';
         this.layout = this.config.layout;
         if (setup.chunkSize === undefined && this.localBackend === 'onnx-asr-web') {
@@ -129,17 +247,17 @@ class WhisperMix {
         this.limiter = new Bottleneck(this.bottleneck);
     }
 
-    async fromFile(filePath, options = {}) {
+    async fromFile(filePath: string, options: TranscriptionOptions = {}): Promise<Transcription> {
         const transcriptionOptions = this._resolveTranscriptionOptions(options);
         const absolutePath = path.resolve(filePath);
-        
+
         // Check if file exists
         try {
             await fs.promises.access(absolutePath, fs.constants.F_OK);
         } catch (error) {
             throw new Error(`File not found: ${absolutePath}`);
         }
-        
+
         const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'whispermix-chunks-'));
 
         try {
@@ -147,17 +265,17 @@ class WhisperMix {
 
             if (duration <= this.chunkSize) {
                 // Process as a single file
-                return this._transcribeFilePath(absolutePath, transcriptionOptions);
+                return await this._transcribeFilePath(absolutePath, transcriptionOptions);
             } else {
                 // Split audio and process chunks
-                const transcriptions = [];
+                const transcriptions: Transcription[] = [];
                 const numChunks = Math.ceil(duration / this.chunkSize);
 
                 for (let i = 0; i < numChunks; i++) {
                     const chunkPath = path.join(tempDir, `chunk-${i}.mp3`);
                     const startTime = i * this.chunkSize;
-                    
-                    await new Promise((resolve, reject) => {
+
+                    await new Promise<void>((resolve, reject) => {
                         ffmpeg(absolutePath)
                             .setStartTime(startTime)
                             .setDuration(this.chunkSize)
@@ -174,7 +292,7 @@ class WhisperMix {
 
                     const transcription = await this._transcribeFilePath(chunkPath, transcriptionOptions);
                     transcriptions.push(this._offsetTranscription(transcription, startTime));
-                    
+
                     // Clean up chunk immediately after processing
                     try {
                         await fs.promises.unlink(chunkPath);
@@ -194,20 +312,20 @@ class WhisperMix {
         }
     }
 
-    async _transcribeFilePath(filePath, options) {
+    async _transcribeFilePath(filePath: string, options: ResolvedTranscriptionOptions): Promise<Transcription> {
         if (this.isLocal) {
             return this._transcribeLocalFile(filePath, options);
         }
         return this.fromStream(fs.createReadStream(filePath), options);
     }
 
-    async fromStream(audioStream, options = {}) {
+    async fromStream(audioStream: AsyncIterable<Uint8Array>, options: TranscriptionOptions = {}): Promise<Transcription> {
         if (this.isLocal) {
             throw new Error('fromStream is not supported for local Whisper model. Use fromFile instead.');
         }
         const transcriptionOptions = this._resolveTranscriptionOptions(options);
 
-        const chunks = [];
+        const chunks: Uint8Array[] = [];
         for await (const chunk of audioStream) {
             chunks.push(chunk);
         }
@@ -216,9 +334,12 @@ class WhisperMix {
         return this.limiter.schedule(() => this._makeRequest(buffer, transcriptionOptions));
     }
 
-    async _makeRequest(buffer, options = {}) {
+    async _makeRequest(buffer: Buffer, options: ResolvedTranscriptionOptions): Promise<Transcription> {
+        if (!this.apiUrl) {
+            throw new Error(`Model "${this.model}" has no API endpoint.`);
+        }
         try {
-            const blob = new Blob([buffer], { type: 'audio/mpeg' });
+            const blob = new Blob([new Uint8Array(buffer)], { type: 'audio/mpeg' });
             const formData = new FormData();
             formData.append('file', blob, 'audio.mp3');
             formData.append('model', this.modelName);
@@ -238,7 +359,7 @@ class WhisperMix {
                 body: formData,
             });
 
-            const responseData = await response.json();
+            const responseData = await response.json() as Record<string, unknown>;
 
             if (!response.ok) {
                 throw responseData;
@@ -246,44 +367,44 @@ class WhisperMix {
 
             return this._formatApiTranscription(responseData, options);
         } catch (error) {
-            throw error?.message || error;
+            throw (error as { message?: unknown } | null)?.message || error;
         }
     }
 
-    async _transcribeLocalFile(filePath, options = {}) {
+    async _transcribeLocalFile(filePath: string, options: ResolvedTranscriptionOptions): Promise<Transcription> {
         try {
             // Read the audio file as a buffer
             const buffer = fs.readFileSync(filePath);
-            
+
             // Decode the audio file (supports MP3, WAV, etc.)
             const audioBuffer = await audioDecode(buffer);
-            
+
             // Convert to Float32Array and resample to 16kHz if needed
             let audioData = new Float32Array(audioBuffer.length);
-            
+
             // Copy audio data
             for (let i = 0; i < audioBuffer.length; i++) {
                 audioData[i] = audioBuffer.getChannelData(0)[i];
             }
-            
+
             // Resample to 16kHz if the sample rate is different
             if (audioBuffer.sampleRate !== 16000) {
                 const ratio = 16000 / audioBuffer.sampleRate;
                 const newLength = Math.round(audioData.length * ratio);
                 const resampledData = new Float32Array(newLength);
-                
+
                 for (let i = 0; i < newLength; i++) {
                     const oldIndex = Math.floor(i / ratio);
                     resampledData[i] = audioData[oldIndex] || 0;
                 }
-                
+
                 audioData = resampledData;
             }
 
             // Reuse a single pipeline instance so repeated calls don't re-download/re-initialize.
             const transcriber = await this._getLocalTranscriber();
 
-            if (this.localBackend === 'onnx-asr-web') {
+            if (typeof transcriber !== 'function') {
                 if (this.language !== undefined && this.showProgress && !this._warnedParakeetLanguage) {
                     console.log('[WhisperMix] "language" option is ignored for Parakeet local models.');
                     this._warnedParakeetLanguage = true;
@@ -297,7 +418,7 @@ class WhisperMix {
             }
 
             // Pass the processed audio data
-            const transcriberOptions = {
+            const transcriberOptions: Record<string, unknown> = {
                 task: 'transcribe',
             };
             if (this.language !== undefined) {
@@ -310,23 +431,24 @@ class WhisperMix {
             const words = options.wordTimestamps ? this._wordsFromTransformersChunks(result.chunks) : undefined;
             return this._formatLocalTranscription(result.text, words, options);
         } catch (error) {
+            const message = errorMessage(error);
             const cacheHint = this.localBackend === 'onnx-asr-web'
                 ? this._getParakeetCacheDir(this.layout)
                 : `${env.cacheDir}${this.modelName}/`;
-            const chunkHint = this.localBackend === 'onnx-asr-web' && /bad_alloc/i.test(error.message)
+            const chunkHint = this.localBackend === 'onnx-asr-web' && /bad_alloc/i.test(message)
                 ? ` Parakeet local models should use short chunks; try chunkSize: ${PARAKEET_DEFAULT_CHUNK_SIZE} or less.`
                 : '';
-            throw new Error(`Local transcription failed: ${error.message}.${chunkHint} If this happened after an interrupted download, remove the model cache at ${cacheHint} and try again.`);
+            throw new Error(`Local transcription failed: ${message}.${chunkHint} If this happened after an interrupted download, remove the model cache at ${cacheHint} and try again.`);
         }
     }
 
-    _resolveTranscriptionOptions(options = {}) {
+    _resolveTranscriptionOptions(options: TranscriptionOptions = {}): ResolvedTranscriptionOptions {
         return {
             wordTimestamps: Boolean(options.wordTimestamps ?? this.wordTimestamps),
         };
     }
 
-    _formatApiTranscription(responseData, options) {
+    _formatApiTranscription(responseData: Record<string, unknown>, options: ResolvedTranscriptionOptions): Transcription {
         const text = this._formatText(responseData.text);
         if (!options.wordTimestamps) {
             return text;
@@ -338,7 +460,7 @@ class WhisperMix {
         };
     }
 
-    _formatLocalTranscription(text, words, options) {
+    _formatLocalTranscription(text: unknown, words: unknown, options: ResolvedTranscriptionOptions): Transcription {
         const formattedText = this._formatText(text);
         if (!options.wordTimestamps) {
             return formattedText;
@@ -349,14 +471,14 @@ class WhisperMix {
         };
     }
 
-    _formatText(text) {
+    _formatText(text: unknown): string {
         if (typeof text !== 'string') {
             throw new Error('Transcription returned no text output.');
         }
         return text.trim();
     }
 
-    _wordsFromTransformersChunks(chunks) {
+    _wordsFromTransformersChunks(chunks: unknown): unknown {
         if (!Array.isArray(chunks)) {
             return undefined;
         }
@@ -366,7 +488,7 @@ class WhisperMix {
         }));
     }
 
-    _normalizeWords(words) {
+    _normalizeWords(words: unknown): TranscriptionWord[] {
         if (!Array.isArray(words)) {
             throw new Error('Word timestamps were requested, but the selected backend did not return word timestamps.');
         }
@@ -394,7 +516,7 @@ class WhisperMix {
             .filter((word) => word.word.length > 0);
     }
 
-    _mergeTranscriptions(transcriptions, options, duration) {
+    _mergeTranscriptions(transcriptions: Transcription[], options: ResolvedTranscriptionOptions, duration: number): Transcription {
         const text = transcriptions
             .map((transcription) => this._transcriptionText(transcription))
             .filter((chunkText) => chunkText.length > 0)
@@ -406,15 +528,15 @@ class WhisperMix {
         }
 
         const words = transcriptions.flatMap((transcription) => {
-            if (!Array.isArray(transcription.words)) {
+            if (typeof transcription === 'string' || !Array.isArray(transcription.words)) {
                 throw new Error('Word timestamps were requested, but a chunk returned no word timestamps.');
             }
             return transcription.words;
         });
         const segments = transcriptions.flatMap((transcription) => (
-            Array.isArray(transcription.segments) ? transcription.segments : []
+            typeof transcription !== 'string' && Array.isArray(transcription.segments) ? transcription.segments : []
         ));
-        const result = { text, words, duration };
+        const result: TimedTranscription = { text, words, duration };
 
         if (segments.length > 0) {
             result.segments = segments;
@@ -423,14 +545,14 @@ class WhisperMix {
         return result;
     }
 
-    _transcriptionText(transcription) {
+    _transcriptionText(transcription: Transcription): string {
         if (typeof transcription === 'string') {
             return transcription.trim();
         }
         return this._formatText(transcription.text);
     }
 
-    _offsetTranscription(transcription, offsetSeconds) {
+    _offsetTranscription(transcription: Transcription, offsetSeconds: number): Transcription {
         if (typeof transcription === 'string' || offsetSeconds === 0) {
             return transcription;
         }
@@ -446,7 +568,7 @@ class WhisperMix {
         };
     }
 
-    _offsetTimedItems(items, offsetSeconds) {
+    _offsetTimedItems<T extends { start?: number; end?: number }>(items: T[], offsetSeconds: number): T[] {
         return items.map((item) => ({
             ...item,
             start: this._offsetTime(item.start, offsetSeconds),
@@ -454,14 +576,14 @@ class WhisperMix {
         }));
     }
 
-    _offsetTime(value, offsetSeconds) {
+    _offsetTime<T>(value: T, offsetSeconds: number): T | number {
         if (typeof value !== 'number') {
             return value;
         }
         return Number((value + offsetSeconds).toFixed(3));
     }
 
-    async _getLocalTranscriber() {
+    async _getLocalTranscriber(): Promise<ParakeetTranscriber | TransformersTranscriber> {
         if (!this.transcriber) {
             if (this.localBackend === 'onnx-asr-web') {
                 if (!this.layout) {
@@ -478,12 +600,12 @@ class WhisperMix {
                 return this.transcriber;
             }
 
-            const options = {};
+            const options: Record<string, unknown> = {};
             if (this.dtype) {
                 options.dtype = this.dtype;
             }
             if (this.showProgress) {
-                options.progress_callback = (event) => {
+                options.progress_callback = (event: { status?: string; file?: string; progress?: number } | null) => {
                     if (!event || !event.status) return;
                     if (event.file && typeof event.progress === 'number') {
                         console.log(`[WhisperMix] ${event.status} ${event.file} ${event.progress.toFixed(1)}%`);
@@ -493,20 +615,20 @@ class WhisperMix {
                 };
             }
 
-            this.transcriber = hfPipeline('automatic-speech-recognition', this.modelName, options);
+            this.transcriber = hfPipeline('automatic-speech-recognition', this.modelName, options) as unknown as Promise<TransformersTranscriber>;
         }
 
         return this.transcriber;
     }
 
-    async _getOnnxAsrNodeModule() {
+    async _getOnnxAsrNodeModule(): Promise<OnnxAsrNodeModule> {
         if (!this._onnxAsrNodeModule) {
             this._onnxAsrNodeModule = await import('onnx-asr-web/node');
         }
         return this._onnxAsrNodeModule;
     }
 
-    _getParakeetCacheDir(layout) {
+    _getParakeetCacheDir(layout: ParakeetLayout | undefined): string {
         if (this.cacheDir) {
             return path.resolve(this.cacheDir);
         }
@@ -516,7 +638,7 @@ class WhisperMix {
         return path.join(os.homedir(), '.cache', 'whispermix', 'parakeet', layout.cacheKey);
     }
 
-    async _ensureParakeetAssets(layout) {
+    async _ensureParakeetAssets(layout: ParakeetLayout): Promise<string> {
         const cacheDir = this._getParakeetCacheDir(layout);
         await fs.promises.mkdir(cacheDir, { recursive: true });
 
@@ -545,7 +667,7 @@ class WhisperMix {
         return cacheDir;
     }
 
-    async _hasFileWithContent(filePath) {
+    async _hasFileWithContent(filePath: string): Promise<boolean> {
         try {
             const stats = await fs.promises.stat(filePath);
             return stats.isFile() && stats.size > 0;
@@ -554,7 +676,7 @@ class WhisperMix {
         }
     }
 
-    async _downloadToFile(url, filePath) {
+    async _downloadToFile(url: string, filePath: string): Promise<void> {
         const response = await fetch(url);
         if (!response.ok) {
             throw new Error(`Download failed (${response.status} ${response.statusText}) for ${url}`);
@@ -568,7 +690,7 @@ class WhisperMix {
 
         try {
             await streamPipeline(
-                Readable.fromWeb(response.body),
+                Readable.fromWeb(response.body as NodeReadableStream),
                 fs.createWriteStream(tempPath),
             );
             await fs.promises.rename(tempPath, filePath);
@@ -579,8 +701,4 @@ class WhisperMix {
     }
 }
 
-// Support both CommonJS and ES modules
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = WhisperMix;
-}
 export default WhisperMix;

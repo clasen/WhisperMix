@@ -8,6 +8,12 @@ WhisperMix is a flexible module that provides an interface for transcribing audi
 npm install whispermix
 ```
 
+Works with Node.js and Bun:
+
+```bash
+bun add whispermix
+```
+
 ## ⚙️ Configuration
 
 Before using WhisperMix with API-based models, you need to set up your environment variables:
@@ -22,6 +28,12 @@ First, import the WhisperMix class:
 
 ```javascript
 import WhisperMix from 'whispermix';
+```
+
+Type definitions are included:
+
+```typescript
+import WhisperMix, { type WhisperMixOptions, type Transcription } from 'whispermix';
 ```
 
 ### 🔧 Initializing WhisperMix
