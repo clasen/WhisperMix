@@ -338,37 +338,35 @@ class WhisperMix {
         if (!this.apiUrl) {
             throw new Error(`Model "${this.model}" has no API endpoint.`);
         }
-        try {
-            const blob = new Blob([new Uint8Array(buffer)], { type: 'audio/mpeg' });
-            const formData = new FormData();
-            formData.append('file', blob, 'audio.mp3');
-            formData.append('model', this.modelName);
-            if (this.language) {
-                formData.append('language', this.language);
-            }
-            if (options.wordTimestamps) {
-                formData.append('response_format', 'verbose_json');
-                formData.append('timestamp_granularities[]', 'word');
-            }
-
-            const response = await fetch(this.apiUrl, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.apiKey}`,
-                },
-                body: formData,
-            });
-
-            const responseData = await response.json() as Record<string, unknown>;
-
-            if (!response.ok) {
-                throw responseData;
-            }
-
-            return this._formatApiTranscription(responseData, options);
-        } catch (error) {
-            throw (error as { message?: unknown } | null)?.message || error;
+        const blob = new Blob([new Uint8Array(buffer)], { type: 'audio/mpeg' });
+        const formData = new FormData();
+        formData.append('file', blob, 'audio.mp3');
+        formData.append('model', this.modelName);
+        if (this.language) {
+            formData.append('language', this.language);
         }
+        if (options.wordTimestamps) {
+            formData.append('response_format', 'verbose_json');
+            formData.append('timestamp_granularities[]', 'word');
+        }
+
+        const response = await fetch(this.apiUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${this.apiKey}`,
+            },
+            body: formData,
+        });
+
+        const responseData = await response.json() as Record<string, unknown>;
+
+        if (!response.ok) {
+            const providerMessage = (responseData.error as { message?: unknown } | undefined)?.message;
+            const detail = typeof providerMessage === 'string' ? `: ${providerMessage}` : '';
+            throw new Error(`Transcription request failed (${response.status} ${response.statusText})${detail}`, { cause: responseData });
+        }
+
+        return this._formatApiTranscription(responseData, options);
     }
 
     async _transcribeLocalFile(filePath: string, options: ResolvedTranscriptionOptions): Promise<Transcription> {
