@@ -1,16 +1,10 @@
 import fs from 'fs';
 import Bottleneck from 'bottleneck';
 import path from 'path';
-import ffmpeg from 'fluent-ffmpeg';
-import { getAudioDurationInSeconds } from 'get-audio-duration';
 import os from 'os'; // For temporary directory
 import { Readable } from 'stream';
 import { pipeline as streamPipeline } from 'stream/promises';
 import type { ReadableStream as NodeReadableStream } from 'stream/web';
-
-// Static imports for local dependencies
-import { pipeline as hfPipeline, env } from '@huggingface/transformers';
-import audioDecode from 'audio-decode';
 
 export type WhisperMixModel =
     | 'openai/whisper-1'
@@ -261,6 +255,7 @@ class WhisperMix {
         const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'whispermix-chunks-'));
 
         try {
+            const { getAudioDurationInSeconds } = await import('get-audio-duration');
             const duration = await getAudioDurationInSeconds(absolutePath);
 
             if (duration <= this.chunkSize) {
@@ -270,6 +265,7 @@ class WhisperMix {
                 // Split audio and process chunks
                 const transcriptions: Transcription[] = [];
                 const numChunks = Math.ceil(duration / this.chunkSize);
+                const { default: ffmpeg } = await import('fluent-ffmpeg');
 
                 for (let i = 0; i < numChunks; i++) {
                     const chunkPath = path.join(tempDir, `chunk-${i}.mp3`);
@@ -375,6 +371,7 @@ class WhisperMix {
             const buffer = fs.readFileSync(filePath);
 
             // Decode the audio file (supports MP3, WAV, etc.)
+            const { default: audioDecode } = await import('audio-decode');
             const audioBuffer = await audioDecode(buffer);
 
             // Convert to Float32Array and resample to 16kHz if needed
@@ -432,7 +429,7 @@ class WhisperMix {
             const message = errorMessage(error);
             const cacheHint = this.localBackend === 'onnx-asr-web'
                 ? this._getParakeetCacheDir(this.layout)
-                : `${env.cacheDir}${this.modelName}/`;
+                : `${(await import('@huggingface/transformers')).env.cacheDir}${this.modelName}/`;
             const chunkHint = this.localBackend === 'onnx-asr-web' && /bad_alloc/i.test(message)
                 ? ` Parakeet local models should use short chunks; try chunkSize: ${PARAKEET_DEFAULT_CHUNK_SIZE} or less.`
                 : '';
@@ -613,7 +610,9 @@ class WhisperMix {
                 };
             }
 
-            this.transcriber = hfPipeline('automatic-speech-recognition', this.modelName, options) as unknown as Promise<TransformersTranscriber>;
+            this.transcriber = import('@huggingface/transformers').then(({ pipeline }) => (
+                pipeline('automatic-speech-recognition', this.modelName, options) as unknown as Promise<TransformersTranscriber>
+            ));
         }
 
         return this.transcriber;
